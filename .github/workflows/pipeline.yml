@@ -1,0 +1,74 @@
+name: Fuel Price Pipeline
+
+on:
+  schedule:
+    # Every Thursday at 00:00 UTC (08:00 MYT)
+    - cron: '0 0 * * 4'
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python -m src.pipeline
+
+      - name: Upload pipeline status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-status
+          path: pipeline_status.json
+          retention-days: 30
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: logs/
+          retention-days: 30
+
+  # Supabase keepalive — runs every Monday to prevent project pausing
+  keepalive:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * 1' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Keepalive ping
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -c "from src.load.database import get_engine; from sqlalchemy import text; e = get_engine(); c = e.connect(); print(c.execute(text('SELECT 1')).scalar()); c.close()"

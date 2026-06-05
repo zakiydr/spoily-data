@@ -1,147 +1,159 @@
-# 🛢️ Spoily Data — Fuel Price Predictor Pipeline
+# 🛢️ Spoily Data — Malaysia Fuel Price Prediction Pipeline
 
-Automated ETL pipeline that tracks and correlates **global Brent Crude prices** with **Malaysian retail fuel prices** (RON97 & RON95), then predicts next week's fuel price using a proportional projection model.
+Automated ETL pipeline that tracks **Brent crude** and **USD/MYR exchange rate** against **Malaysian retail fuel prices** (RON95 non-subsidized and RON97), then stores historical predictions for model evaluation and dashboard use.
+
+## What It Does
+
+- Extracts:
+  - Brent daily prices (EIA API)
+  - Malaysia weekly fuel prices (data.gov.my)
+  - USD/MYR daily rates (Frankfurter)
+- Builds weekly features with both lag windows:
+  - `T-1` (1 week prior)
+  - `T-2` (2 weeks prior)
+- Benchmarks methodologies using walk-forward backtesting:
+  - `proportional`
+  - `linear_regression`
+- Auto-selects the best methodology per fuel type (lowest MAPE).
+- Persists:
+  - weekly fact table (`fact_weekly_fuel_pricing`)
+  - model/lag prediction history (`fact_weekly_fuel_predictions`)
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Extract
-        EIA["🛢️ EIA API\n(Brent Daily)"]
-        FUEL["🇲🇾 data.gov.my\n(BBM Weekly)"]
-        FX["💱 Frankfurter\n(USD/MYR Daily)"]
+        EIA["EIA API\nBrent Daily"]
+        FUEL["data.gov.my\nFuel Weekly"]
+        FX["Frankfurter\nUSD/MYR Daily"]
     end
 
     subgraph Process
-        TX["🔄 Transform\n(T-2 Alignment)"]
-        FC["📈 Forecast\n(Proportional)"]
-        DQ["✅ Data Quality\n(Soft Validation)"]
+        TX["Transform\nBuild T-1 and T-2 windows"]
+        FC["Forecast\nProportional vs Linear Regression"]
+        SEL["Model Selection\nBest MAPE by fuel"]
+        DQ["Data Quality\nSoft validation"]
     end
 
     subgraph Store
-        DB["🐘 Supabase\n(PostgreSQL)"]
-        API["🌐 PostgREST\n(Auto REST API)"]
+        DB1["fact_weekly_fuel_pricing"]
+        DB2["fact_weekly_fuel_predictions"]
+        API["PostgREST API"]
     end
 
     EIA --> TX
     FUEL --> TX
     FX --> TX
-    TX --> FC --> DQ --> DB --> API
+    TX --> FC --> SEL --> DQ --> DB1
+    SEL --> DB2
+    DB1 --> API
+    DB2 --> API
 ```
-
-## How It Works
-
-| Concept | Detail |
-|:--------|:-------|
-| **Pricing Cycle** | Malaysia sets fuel prices weekly (Thu → Wed) |
-| **T-2 Lag** | BBM price this week is influenced by Brent price ~2 weeks prior |
-| **Prediction** | If Brent moved X% from T-2 to T-1, project same % change to BBM |
-| **Schedule** | Pipeline runs every Thursday 8 AM MYT via cron / GitHub Actions |
 
 ## Data Sources
 
-| Source | What | Auth |
-|:-------|:-----|:-----|
-| [EIA API v2](https://www.eia.gov/opendata/) | Brent crude daily spot price | API key (free) |
-| [data.gov.my](https://data.gov.my/data-catalogue/fuelprice) | RON95, RON97, diesel weekly prices | None |
-| [Frankfurter API](https://frankfurter.dev/) | USD/MYR daily exchange rate | None |
+| Source | Data | Auth |
+|:--|:--|:--|
+| [EIA API v2](https://www.eia.gov/opendata/) | Brent daily spot price | API key |
+| [data.gov.my fuelprice](https://data.gov.my/data-catalogue/fuelprice) | Weekly RON95/RON97 | None |
+| [Frankfurter API](https://frankfurter.dev/) | Daily USD/MYR | None |
 
 ## Quick Start
 
 ### Prerequisites
+
 - Python 3.10+
-- [EIA API key](https://www.eia.gov/opendata/register.php) (free)
-- [Supabase project](https://supabase.com) (free tier)
+- EIA API key
+- Supabase project
 
 ### Setup
 
 ```bash
-# 1. Clone & setup
+# 1) Clone + install
 git clone <repo-url> && cd spoily-data
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # Linux/Mac
-
+.venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2. Configure environment
+# 2) Configure environment
 copy .env.example .env
-# Edit .env with your keys
+# Fill EIA_API_KEY and DATABASE_URL (plus Supabase keys if needed)
 
-# 3. Initialize database
-# Go to Supabase SQL Editor → paste & run src/sql/init.sql
+# 3) Initialize DB schema
+# Run src/sql/init.sql in Supabase SQL Editor
 
-# 4. Run pipeline
+# 4) Run pipeline
 python -m src.pipeline
 ```
 
-### Using Make
+## Pipeline Behavior
 
-```bash
-make setup      # Create venv + install deps
-make run        # Run full pipeline
-make test       # Run tests
-make keepalive  # Ping Supabase to prevent pausing
+- Default run backfills approximately **3 years** of history (+30 days buffer for lag alignment).
+- Produces weekly predictions for:
+  - `RON97`
+  - `RON95` non-subsidized
+- Evaluates methods over history and writes selected predictions to fact table.
+
+## Database Tables
+
+### 1) `fact_weekly_fuel_pricing`
+Main weekly dataset for consumption by API/dashboard.
+
+Key columns:
+- `pricing_week_start`, `pricing_week_end`
+- `ron97_price_myr`, `ron95_price_myr`, `ron95_subsidy_myr`
+- `avg_brent_t2_usd`, `avg_usd_myr_t2`
+- `predicted_ron97_myr`, `predicted_ron95_myr`
+- `prediction_delta_pct`
+
+### 2) `fact_weekly_fuel_predictions`
+Prediction history for methodology audit and dashboard comparison.
+
+Key columns:
+- `pricing_week_start`
+- `fuel_type` (`RON95` / `RON97`)
+- `model_type` (`proportional` / `linear_regression`)
+- `lag_weeks` (`1` / `2`)
+- `predicted_price_myr`, `actual_price_myr`
+- `abs_pct_error`, `signed_pct_error`
+
+## Example SQL Queries
+
+```sql
+-- Latest weekly actual vs selected prediction
+SELECT pricing_week_start, ron97_price_myr, predicted_ron97_myr,
+       ron95_price_myr, predicted_ron95_myr, prediction_delta_pct
+FROM fact_weekly_fuel_pricing
+ORDER BY pricing_week_start DESC
+LIMIT 20;
+```
+
+```sql
+-- Model leaderboard (MAPE)
+SELECT fuel_type, model_type, lag_weeks,
+       ROUND(AVG(abs_pct_error)::numeric, 4) AS mape,
+       COUNT(*) AS rows
+FROM fact_weekly_fuel_predictions
+GROUP BY fuel_type, model_type, lag_weeks
+ORDER BY fuel_type, mape ASC;
 ```
 
 ## Project Structure
 
-```
+```text
 spoily-data/
 ├── src/
-│   ├── config/
-│   │   └── settings.py          # Env vars + constants
-│   ├── extract/
-│   │   ├── brent_crude.py       # EIA API extractor
-│   │   ├── malaysia_fuel.py     # data.gov.my extractor
-│   │   └── exchange_rate.py     # Frankfurter API extractor
-│   ├── transform/
-│   │   └── processor.py         # T-2 alignment + merge
-│   ├── forecast/
-│   │   └── estimator.py         # Price prediction (Step 1)
-│   ├── quality/
-│   │   └── checks.py            # Data validation
-│   ├── load/
-│   │   └── database.py          # Supabase upsert
-│   ├── sql/
-│   │   └── init.sql             # DDL schema
-│   └── pipeline.py              # Orchestrator
-├── .github/workflows/
-│   └── pipeline.yml             # Scheduled CI/CD
-├── .env.example                 # Env template
-├── Makefile                     # Common commands
-└── requirements.txt             # Dependencies
-```
-
-## Database Schema
-
-Single fact table: `fact_weekly_fuel_pricing`
-
-| Column | Type | Description |
-|:-------|:-----|:------------|
-| `pricing_week_start` | DATE (PK) | Thursday effective date |
-| `pricing_week_end` | DATE | Wednesday end date |
-| `ron97_price_myr` | DECIMAL | RON97 retail price (MYR) |
-| `ron95_price_myr` | DECIMAL | RON95 non-subsidized price (MYR) |
-| `ron95_subsidy_myr` | DECIMAL | RON95 BUDI 95 subsidized price |
-| `avg_brent_t2_usd` | DECIMAL | Avg Brent crude 2 weeks prior (USD) |
-| `avg_usd_myr_t2` | DECIMAL | Avg exchange rate 2 weeks prior |
-| `predicted_ron97_myr` | DECIMAL | Predicted RON97 price |
-| `predicted_ron95_myr` | DECIMAL | Predicted RON95 price |
-| `prediction_delta_pct` | DECIMAL | Prediction error % |
-
-## REST API (Auto)
-
-Supabase auto-generates a PostgREST API:
-
-```bash
-# Get all data
-curl "https://<project>.supabase.co/rest/v1/fact_weekly_fuel_pricing" \
-  -H "apikey: <anon-key>"
-
-# Get latest week
-curl "https://<project>.supabase.co/rest/v1/fact_weekly_fuel_pricing?order=pricing_week_start.desc&limit=1" \
-  -H "apikey: <anon-key>"
+│   ├── extract/            # EIA / data.gov.my / FX extractors
+│   ├── transform/          # Weekly feature engineering (T-1 + T-2)
+│   ├── forecast/           # Walk-forward forecasting + model selection
+│   ├── quality/            # Data quality checks
+│   ├── load/               # Supabase/Postgres upsert logic
+│   ├── sql/                # DB schema (init.sql)
+│   └── pipeline.py         # End-to-end orchestrator
+├── scripts/                # Analysis scripts
+├── requirements.txt
+└── README.md
 ```
 
 ## License

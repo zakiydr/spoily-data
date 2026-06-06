@@ -28,7 +28,7 @@ def transform_weekly(
 
     Args:
         brent_df: columns [date, brent_usd] — daily Brent prices
-        fuel_df: columns [date, ron95, ron95_subsidy, ron97] — weekly fuel prices
+        fuel_df: columns [date, ron95, ron97] — weekly fuel prices
         rates_df: columns [date, usd_myr] — daily exchange rates
 
     Returns:
@@ -70,7 +70,6 @@ def transform_weekly(
                 "pricing_week_end": pricing_week_end.date(),
                 "ron97_price_myr": fuel_row["ron97"],
                 "ron95_price_myr": fuel_row["ron95"],
-                "ron95_subsidy_myr": fuel_row.get("ron95_subsidy"),
                 "avg_brent_t1_usd": avg_brent_t1,
                 "avg_usd_myr_t1": avg_rate_t1,
                 "avg_brent_t2_usd": avg_brent_t2,

@@ -102,10 +102,12 @@ Main weekly dataset for consumption by API/dashboard.
 
 Key columns:
 - `pricing_week_start`, `pricing_week_end`
-- `ron97_price_myr`, `ron95_price_myr`, `ron95_subsidy_myr`
+- `ron97_price_myr`, `ron95_price_myr`
 - `avg_brent_t2_usd`, `avg_usd_myr_t2`
 - `predicted_ron97_myr`, `predicted_ron95_myr`
 - `prediction_delta_pct`
+
+
 
 ### 2) `fact_weekly_fuel_predictions`
 Prediction history for methodology audit and dashboard comparison.

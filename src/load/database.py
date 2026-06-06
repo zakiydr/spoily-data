@@ -19,7 +19,6 @@ FACT_COLUMNS = [
     "pricing_week_end",
     "ron97_price_myr",
     "ron95_price_myr",
-    "ron95_subsidy_myr",
     "avg_brent_t2_usd",
     "avg_usd_myr_t2",
     "predicted_ron97_myr",
@@ -59,13 +58,13 @@ UPSERT_FACT_SQL = text(
     """
     INSERT INTO fact_weekly_fuel_pricing (
         pricing_week_start, pricing_week_end,
-        ron97_price_myr, ron95_price_myr, ron95_subsidy_myr,
+        ron97_price_myr, ron95_price_myr,
         avg_brent_t2_usd, avg_usd_myr_t2,
         predicted_ron97_myr, predicted_ron95_myr, prediction_delta_pct,
         last_updated
     ) VALUES (
         :pricing_week_start, :pricing_week_end,
-        :ron97_price_myr, :ron95_price_myr, :ron95_subsidy_myr,
+        :ron97_price_myr, :ron95_price_myr,
         :avg_brent_t2_usd, :avg_usd_myr_t2,
         :predicted_ron97_myr, :predicted_ron95_myr, :prediction_delta_pct,
         NOW()
@@ -74,7 +73,6 @@ UPSERT_FACT_SQL = text(
         pricing_week_end     = EXCLUDED.pricing_week_end,
         ron97_price_myr      = EXCLUDED.ron97_price_myr,
         ron95_price_myr      = EXCLUDED.ron95_price_myr,
-        ron95_subsidy_myr    = EXCLUDED.ron95_subsidy_myr,
         avg_brent_t2_usd     = EXCLUDED.avg_brent_t2_usd,
         avg_usd_myr_t2       = EXCLUDED.avg_usd_myr_t2,
         predicted_ron97_myr  = EXCLUDED.predicted_ron97_myr,
